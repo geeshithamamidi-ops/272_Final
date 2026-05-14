@@ -1,0 +1,20 @@
+.DS_Store
+
+# Test files (large)
+*.bin
+*.bin.sha256
+*.bin.partial
+
+# Credential files — never commit
+certs/
+*.hex
+*.key
+*.crt
+*.pem
+*.srl
+*.csr
+
+# Python
+__pycache__/
+*.pyc
+.venv/
