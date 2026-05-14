@@ -160,7 +160,14 @@ def transfer(
     if ack_raw == b"ACK\x00":
         elapsed = time.monotonic() - t0
         mbps = (bytes_sent / (1024**2)) / elapsed
-        print(f"[✓] Transfer complete!  {mbps:.2f} MB/s average")
+        gbps = mbps / 1024
+        print(f"[✓] Transfer complete!")
+        print(f"    ┌─────────────────────────────────┐")
+        print(f"    │  Bytes sent   : {bytes_sent / (1024**3):.3f} GB          │")
+        print(f"    │  Time elapsed : {elapsed:.1f}s               │")
+        print(f"    │  Throughput   : {mbps:.2f} MB/s ({gbps:.3f} GB/s) │")
+        print(f"    │  Chunks sent  : {chunk_index}                  │")
+        print(f"    └─────────────────────────────────┘")
     else:
         print(f"[✗] Receiver reported error: {ack_raw!r}")
         sys.exit(1)
