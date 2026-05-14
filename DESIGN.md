@@ -1,7 +1,7 @@
 # DESIGN.md — Secure 4 GB File Transfer
 
 ---
-
+Both designs assume the network is fully hostile — any packet may be observed, modified, replayed, reordered, or dropped. Security does not rely on the confidentiality of the transport path. All cryptographic guarantees are enforced at the application layer independent of network behavior
 ## Approach A: Mutually-Authenticated TLS Streaming
 
 ### Architecture

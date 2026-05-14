@@ -46,6 +46,11 @@ MANIFEST_BODY_SIZE = 32 + 8 + 8 + 32
 MANIFEST_HMAC_SIZE = 32
 
 
+def _safe_hex(b: bytes, show: int = 8) -> str:
+    """Show only first `show` bytes of sensitive material in logs."""
+    return b.hex()[: show * 2] + "…"
+
+
 def send_msg(sock: socket.socket, msg_type: bytes, payload: bytes) -> None:
     frame = msg_type + payload
     header = struct.pack(FRAME_HDR_FMT, len(frame))
@@ -161,7 +166,7 @@ def perform_handshake(
     sender_nonce = payload[SALT_SIZE:SALT_SIZE + 32]
 
     enc_key, auth_key = derive_keys(psk, salt)
-    print(f"[✓] Keys derived from PSK  salt={salt.hex()[:16]}…")
+    print(f"[✓] Encryption and authentication keys derived  salt={_safe_hex(salt, show=8)}")
 
     receiver_nonce = os.urandom(32)
     mac = hmac_mod.new(
@@ -286,6 +291,12 @@ def receive_transfer(
 
                 elif msg_type == MSG_ERR:
                     raise RuntimeError(f"Sender sent error: {payload!r}")
+
+                # SECURITY NOTE: We only exit this loop through the MSG_MANIFEST branch.
+                # A TCP FIN or connection drop before manifest arrival raises EOFError,
+                # which propagates as an exception and prevents temp file rename.
+                # TCP FIN alone is never treated as proof of a complete transfer.
+
                 else:
                     raise ValueError(f"Unknown message type: {msg_type!r}")
 
@@ -344,6 +355,9 @@ def main() -> None:
         print(f"[*] Connection from {addr}")
 
         try:
+            # No data is trusted until perform_handshake() completes and the
+            # HMAC(auth_key, sender_nonce || receiver_nonce) is verified.
+            # Authentication precedes all file data processing.
             enc_key, auth_key, salt = perform_handshake(conn, psk, resume_offset)
             receive_transfer(conn, args.out, enc_key, auth_key, salt, resume_offset)
         except Exception as exc:

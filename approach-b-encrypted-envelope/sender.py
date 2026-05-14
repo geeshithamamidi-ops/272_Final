@@ -64,6 +64,11 @@ INITIAL_BACKOFF = 2  # seconds
 MAX_BACKOFF = 60  # seconds
 
 
+def _safe_hex(b: bytes, show: int = 8) -> str:
+    """Show only first `show` bytes of sensitive material in logs."""
+    return b.hex()[: show * 2] + "…"
+
+
 def connect_with_retry(host: str, port: int) -> socket.socket:
     backoff = INITIAL_BACKOFF
     for attempt in range(1, MAX_RETRIES + 1):
@@ -187,7 +192,7 @@ def perform_handshake(
 
     # Step 1: Send hello
     send_msg(sock, MSG_HELLO, salt + sender_nonce)
-    print(f"[*] Handshake sent  salt={salt.hex()[:16]}…")
+    print(f"[*] Handshake sent  salt={_safe_hex(salt, show=8)}")
 
     # Step 2: Receive ack
     msg_type, payload = recv_msg(sock)
@@ -324,7 +329,7 @@ def main() -> None:
     psk = load_psk(args.psk_file)
     salt = os.urandom(SALT_SIZE)  # fresh per session
     enc_key, auth_key = derive_keys(psk, salt)
-    print(f"[*] Derived keys from PSK  salt={salt.hex()[:16]}…")
+    print(f"[*] Derived encryption and authentication keys  salt={_safe_hex(salt, show=8)}")
 
     print(f"[*] Connecting to {args.host}:{args.port} …")
     sock = connect_with_retry(args.host, args.port)

@@ -44,6 +44,11 @@ MANIFEST_HMAC_SIZE = 32
 MANIFEST_TOTAL_SIZE = 1 + MANIFEST_BODY_SIZE + MANIFEST_HMAC_SIZE  # includes TYPE byte
 
 
+def _safe_hex(b: bytes, show: int = 8) -> str:
+    """Show only first `show` bytes of sensitive material in logs."""
+    return b.hex()[: show * 2] + "…"
+
+
 def recv_exactly(sock: ssl.SSLSocket, n: int) -> bytes:
     """Read exactly n bytes from TLS socket; raises EOFError on connection close."""
     buf = bytearray()
@@ -123,8 +128,9 @@ def receive_transfer(
                     # Authenticate session binding
                     if frame_session_id != session_id:
                         raise ValueError(
-                            f"Session ID mismatch: expected {session_id.hex()}, "
-                            f"got {frame_session_id.hex()}"
+                            "Session ID mismatch: expected "
+                            f"{_safe_hex(session_id, show=8)}, got "
+                            f"{_safe_hex(frame_session_id, show=8)}"
                         )
 
                     # Authenticate chunk ordering (prevents reorder/replay)
@@ -204,6 +210,11 @@ def receive_transfer(
 
                 elif frame_type == TYPE_ABORT:
                     raise RuntimeError("Sender sent ABORT signal")
+
+                # SECURITY NOTE: We only exit this loop through the TYPE_MANIFEST branch.
+                # A TCP FIN or connection drop before manifest arrival raises EOFError,
+                # which propagates as an exception and prevents temp file rename.
+                # TCP FIN alone is never treated as proof of a complete transfer.
 
                 else:
                     raise ValueError(f"Unknown frame type: {frame_type!r}")
@@ -302,20 +313,23 @@ def main() -> None:
 
             # Derive or receive session key
             if session_key_pre is None:
-                # Receive the session key sent by sender over the authenticated TLS tunnel
+                # Receive chunk AEAD key material sent by sender over the authenticated TLS tunnel
                 session_key = recv_exactly(tls_conn, 32)
-                print("[*] Received session key over authenticated TLS channel")
+                print("[*] Received chunk encryption key material over authenticated TLS channel")
             else:
                 session_key = session_key_pre
-                # Sender will still send a session key; read and discard or verify
+                # Sender will still send key material; read and verify against CLI value
                 sent_key = recv_exactly(tls_conn, 32)
                 if sent_key != session_key:
-                    raise ValueError("Pre-shared session key mismatch with sender's key")
-                print("[*] Pre-shared session key verified")
+                    raise ValueError(
+                        "Pre-shared chunk encryption key mismatch with sender (key material not logged)"
+                    )
+                print("[*] Pre-shared chunk encryption key material verified (values not logged)")
 
-            # Receive session_id from sender
+            # Sender identity was verified by mTLS handshake above (CERT_REQUIRED).
+            # It is safe to receive application data from this point forward.
             session_id = recv_exactly(tls_conn, SESSION_ID_SIZE)
-            print(f"[*] Session ID: {session_id.hex()[:16]}…")
+            print(f"[*] Session ID: {_safe_hex(session_id, show=8)}")
 
             receive_transfer(tls_conn, args.out, session_key, session_id)
 

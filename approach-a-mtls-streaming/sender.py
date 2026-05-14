@@ -52,6 +52,11 @@ INITIAL_BACKOFF = 2  # seconds
 MAX_BACKOFF = 60  # seconds
 
 
+def _safe_hex(b: bytes, show: int = 8) -> str:
+    """Show only first `show` bytes of sensitive material in logs."""
+    return b.hex()[: show * 2] + "…"
+
+
 def connect_with_retry(host: str, port: int) -> socket.socket:
     backoff = INITIAL_BACKOFF
     for attempt in range(1, MAX_RETRIES + 1):
@@ -129,7 +134,7 @@ def transfer(
     bytes_sent = 0
     t0 = time.monotonic()
 
-    print(f"[*] Transfer start  session_id={session_id.hex()[:16]}…")
+    print(f"[*] Transfer start  session_id={_safe_hex(session_id, show=8)}")
     print(f"    File: {file_path}  ({file_size / (1024**3):.3f} GB)")
     print(f"    Chunk size: {CHUNK_SIZE // 1024} KB")
 
@@ -262,9 +267,9 @@ def main() -> None:
         if session_key is None:
             # No PSK provided: generate a random one-time key for this session
             session_key = os.urandom(32)
-            print("[*] Generated random per-session chunk key")
+            print("[*] Generated random chunk encryption key for this session (key material not logged)")
         else:
-            print("[*] Using provided session key")
+            print("[*] Using CLI-supplied chunk encryption key material (key material not logged)")
 
         # Always send the session key to receiver over the mutually-authenticated TLS channel
         # (safe because TLS provides confidentiality and both sides are authenticated)
