@@ -47,6 +47,27 @@ PROTOCOL_VERSION: int = 1
 FRAME_HEADER_FMT = "!I"
 FRAME_HEADER_SIZE = struct.calcsize(FRAME_HEADER_FMT)
 
+MAX_RETRIES = 5
+INITIAL_BACKOFF = 2  # seconds
+MAX_BACKOFF = 60  # seconds
+
+
+def connect_with_retry(host: str, port: int) -> socket.socket:
+    backoff = INITIAL_BACKOFF
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            print(f"[*] Connection attempt {attempt}/{MAX_RETRIES}...")
+            sock = socket.create_connection((host, port), timeout=30)
+            print(f"[✓] Connected on attempt {attempt}")
+            return sock
+        except (ConnectionRefusedError, TimeoutError, OSError) as e:
+            if attempt == MAX_RETRIES:
+                raise
+            print(f"[!] Failed: {e}. Retrying in {backoff}s...")
+            time.sleep(backoff)
+            backoff = min(backoff * 2, MAX_BACKOFF)
+    raise RuntimeError("connect_with_retry: unreachable")
+
 # Chunk types sent over TLS stream
 TYPE_CHUNK    = b"\x01"
 TYPE_MANIFEST = b"\x02"
@@ -226,14 +247,14 @@ def main() -> None:
     ctx = build_ssl_context(args.cert, args.key, args.ca)
 
     print(f"[*] Connecting to {args.host}:{args.port} …")
-    raw_sock = socket.create_connection((args.host, args.port), timeout=30)
+    raw_sock = connect_with_retry(args.host, args.port)
     tls_sock = ctx.wrap_socket(raw_sock, server_side=False)
 
     try:
         print(f"[✓] TLS {tls_sock.version()} established")
         verify_peer_cn(tls_sock, args.receiver_cn)
 
-            # Derive per-session key if not provided.
+        # Derive per-session key if not provided.
         # We generate a random 32-byte session salt, send it over the TLS tunnel
         # (protected by TLS confidentiality), then both sides derive the chunk
         # AEAD key via HKDF(PSK_OR_RANDOM, session_salt, info="chunk-aead-v1").

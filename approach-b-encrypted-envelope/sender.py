@@ -59,6 +59,27 @@ MSG_MANIFEST     = b"\x14"   # End-of-transfer manifest
 MSG_ACK          = b"\x15"   # Final acknowledgement
 MSG_ERR          = b"\xFF"   # Error / abort
 
+MAX_RETRIES = 5
+INITIAL_BACKOFF = 2  # seconds
+MAX_BACKOFF = 60  # seconds
+
+
+def connect_with_retry(host: str, port: int) -> socket.socket:
+    backoff = INITIAL_BACKOFF
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            print(f"[*] Connection attempt {attempt}/{MAX_RETRIES}...")
+            sock = socket.create_connection((host, port), timeout=30)
+            print(f"[✓] Connected on attempt {attempt}")
+            return sock
+        except (ConnectionRefusedError, TimeoutError, OSError) as e:
+            if attempt == MAX_RETRIES:
+                raise
+            print(f"[!] Failed: {e}. Retrying in {backoff}s...")
+            time.sleep(backoff)
+            backoff = min(backoff * 2, MAX_BACKOFF)
+    raise RuntimeError("connect_with_retry: unreachable")
+
 
 def send_msg(sock: socket.socket, msg_type: bytes, payload: bytes) -> None:
     frame = msg_type + payload
@@ -306,7 +327,7 @@ def main() -> None:
     print(f"[*] Derived keys from PSK  salt={salt.hex()[:16]}…")
 
     print(f"[*] Connecting to {args.host}:{args.port} …")
-    sock = socket.create_connection((args.host, args.port), timeout=60)
+    sock = connect_with_retry(args.host, args.port)
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
     try:

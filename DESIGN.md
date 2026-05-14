@@ -36,7 +36,10 @@ sender.crt + sender.key                      receiver.crt + receiver.key
 
 ### Key Exchange and Key Management
 
-- **Transport keys**: TLS 1.3 uses ECDHE (X25519 by default in Python's OpenSSL build) for the handshake. Forward secrecy: compromise of long-term cert private keys does not expose session traffic.
+- **Transport keys**: TLS 1.3 uses ECDHE (X25519 by default in Python's OpenSSL build) for the handshake.
+
+TLS 1.3 uses ECDHE (X25519) for key exchange, which provides forward secrecy. A fresh ephemeral key pair is generated for every connection and discarded immediately after the handshake. Forward secrecy matters here because the file being transferred may remain sensitive long after the transfer completes. An attacker who records the entire TCP session today and later steals the sender's certificate private key gets nothing — the session traffic key cannot be reconstructed. Approach B has no forward secrecy: a stolen PSK allows decryption of all past recorded sessions, which is the key long-term trade-off between the two designs.
+
 - **Session key**: A 256-bit random key is generated fresh each connection by the sender and transmitted to the receiver inside the fully-encrypted TLS channel. Both sender cert and receiver cert have been verified before this key is sent, so the key cannot be intercepted by a MITM.
 - **Chunk AEAD key**: The session key is used directly for AES-256-GCM chunk encryption (no further derivation needed since it is already a fresh 256-bit random).
 
@@ -159,6 +162,8 @@ Both nonces prevent replay: a replayed MSG_HELLO_ACK from session N cannot be us
 - The partial file is only renamed to the final path after all verification passes.
 - **Note**: The resuming session must use the same PSK but will have a *new* salt and thus new keys. The receiver re-hashes already-received bytes to continue the running SHA-256 correctly.
 
+The resume offset is included inside the MSG_HELLO_ACK payload, which is authenticated by HMAC(auth_key, sender_nonce || receiver_nonce). This means the offset is cryptographically signed — a man-in-the-middle cannot forge or modify the resume offset without invalidating the HMAC and causing the sender to abort.
+
 ### Exact Algorithms and Parameters
 
 | Parameter | Value |
@@ -185,6 +190,8 @@ Both nonces prevent replay: a replayed MSG_HELLO_ACK from session N cannot be us
 | **Replay of an earlier valid transfer** | I/A | Each session has a fresh random salt → fresh HKDF-derived keys. Replaying recorded traffic from session N into session M fails at handshake: the sender_nonce differs, so the replayed HELLO_ACK HMAC is invalid. Even if nonces matched, the chunk keys differ because the enc_key is derived from the current session's salt. |
 | **Connection drops at 80% transferred** | A | Receiver writes only to `.partial`. Final file path is never touched until full SHA-256 and manifest HMAC verification pass. On reconnect, resume logic picks up from the last complete chunk boundary. |
 | **Untrusted intermediary (broker)** | C/I | Approach B's application-layer encryption means a broker that sees only the TCP stream gets only ciphertext and HMAC-authenticated metadata. The enc_key and auth_key are derived from the PSK+salt and never transmitted in plaintext. A broker compromise reveals: the salt (useless without PSK), the ciphertext (useless without enc_key), and the manifest (useless to forge without auth_key). This design would support a store-and-forward broker tier without modification. |
+
+A malicious broker sitting between sender and receiver sees only: the random salt (useless without the PSK), AES-256-GCM ciphertext (useless without enc_key), and HMAC-authenticated framing (unforgeable without auth_key). Neither enc_key nor auth_key ever appear on the wire — they are derived locally on each endpoint from PSK + salt via HKDF. A full broker compromise, including all stored traffic, reveals nothing about the file contents or the PSK.
 
 ---
 
